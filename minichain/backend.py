@@ -143,8 +143,17 @@ class OpenAIBase(Backend):
 class OpenAI(OpenAIBase):
     def run(self, request: Request) -> str:
         import openai
+        from tenacity import (
+            retry,
+            stop_after_attempt,
+            wait_random_exponential,
+        )  # for exponential backoff
+        @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+        def completion_with_backoff(**kwargs):
+            return openai.Completion.create(**kwargs)
 
-        ans = openai.Completion.create(
+        #ans = openai.Completion.create(
+        ans = completion_with_backoff(
             **self.options,
             stop=request.stop,
             prompt=request.prompt,
@@ -165,6 +174,44 @@ class OpenAI(OpenAIBase):
         )
         return str(ans.choices[0].text)
 
+class OpenAIChat(OpenAI):
+    def run(self, request: Request) -> str:
+        import openai
+        from tenacity import (
+            retry,
+            stop_after_attempt,
+            wait_random_exponential,
+        )  # for exponential backoff
+
+        @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+        def chat_completion_with_backoff(**kwargs):
+            return openai.ChatCompletion.create(**kwargs)
+
+        #ans = openai.ChatCompletion.create(
+        ans = chat_completion_with_backoff(
+            **self.options,
+            stop=request.stop,
+            messages=[
+                {"role": "user", "content": request.prompt},
+            ],
+        )
+        return str(ans["choices"][0]["message"]["content"])
+
+    async def arun(self, request: Request) -> str:
+        raise NotImplementedError
+        import async_openai
+
+        async_openai.OpenAI.configure(
+            api_key=self.api_key,
+            debug_enabled=False,
+        )
+        ans = await async_openai.OpenAI.ChatCompletions.async_create(
+            **self.options,
+            stop=request.stop,
+            prompt=request.prompt,
+        )
+        return str(ans.choices[0].text)
+
 
 class OpenAIEmbed(OpenAIBase):
     def __init__(self, model: str = "text-embedding-ada-002", **kwargs: Any) -> None:
@@ -172,8 +219,18 @@ class OpenAIEmbed(OpenAIBase):
 
     def run(self, request: Request) -> str:
         import openai
+        from tenacity import (
+            retry,
+            stop_after_attempt,
+            wait_random_exponential,
+        )  # for exponential backoff
 
-        ans = openai.Embedding.create(
+        @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+        def embedding_with_backoff(**kwargs):
+            return openai.Embedding.create(**kwargs)
+
+        #ans = openai.Embedding.create(
+        ans = embedding_with_backoff(
             engine=self.model,
             input=request.prompt,
         )
@@ -254,6 +311,7 @@ class MiniChain:
     Google = Google
 
     OpenAI = OpenAI
+    OpenAIChat = OpenAIChat
     OpenAIEmbed = OpenAIEmbed
     HuggingFace = HuggingFace
     HuggingFaceEmbed = HuggingFaceEmbed
